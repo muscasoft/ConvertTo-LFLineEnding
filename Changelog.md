@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.2.0] - 2026-09-18
+
+### Added
+- `-Type` parameter (`PS1` or `Go`, default `PS1`): selects both the file
+  filter (`*.ps1`/`*.go`) and the BOM convention to enforce — PS1 files
+  are expected to be UTF-8 **with** a BOM, Go files UTF-8 **without**
+  one.
+- `-LineEnding` parameter (`LF` or `CRLF`, default `LF`): the target line
+  ending. All CRLF/CR/LF variants found in a file are normalized to this
+  value (previously the target was hardcoded to LF).
+- `-RemoveBom` switch: the mirror of `-AddBom`, for Go files. Strips the
+  BOM from Go files that have one, normalizing line endings in the same
+  write.
+- `-IgnoreWarnings` switch: bypasses the new warning-and-stop checks
+  below and proceeds anyway.
+- Warning-and-stop checks, run before any file is touched:
+  - `-Type Go` with `-LineEnding CRLF` (goes against Go's LF convention).
+  - `-Type Go` with `-AddBom` (Go files should not have a BOM).
+  - `-Type PS1` with `-RemoveBom` (PS1 files should keep their BOM).
+  - `-AddBom` combined with `-RemoveBom` always throws, `-IgnoreWarnings`
+    included, since the two are contradictory rather than merely risky.
+- Pester tests covering `-Type Go`, `-RemoveBom`, `-LineEnding CRLF`, and
+  all of the warning-and-stop combinations above.
+- `README.md` updated with a parameter table and a table of the
+  warning-and-stop combinations.
+
+### Changed
+- Skip/fix messages and the summary line generalized from PS1-specific
+  wording ("no BOM" / "BOM added") to convention-agnostic wording
+  ("wrong BOM" / "BOM fixed") that applies to both `-Type` values.
+- The closing tip after a run now points to `-AddBom` or `-RemoveBom`
+  depending on which `-Type` is active.
+
 ## [1.1.0] - 2026-09-18
 
 ### Added

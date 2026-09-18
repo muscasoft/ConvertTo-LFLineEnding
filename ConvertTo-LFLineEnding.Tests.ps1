@@ -51,7 +51,7 @@ Describe "ConvertTo-LFLineEnding" {
         New-Item -ItemType Directory -Path $TestRoot | Out-Null
     }
 
-    Context "UTF-8 with BOM files" {
+    Context "ps1 (default type), UTF-8 with BOM files" {
 
         It "Converts CRLF line endings to LF" {
             $file = Join-Path $TestRoot "crlf.ps1"
@@ -98,7 +98,7 @@ Describe "ConvertTo-LFLineEnding" {
         }
     }
 
-    Context "Valid UTF-8 files without a BOM" {
+    Context "ps1: valid UTF-8 files without a BOM" {
 
         It "Skips the file by default and leaves it untouched" {
             $file = Join-Path $TestRoot "nobom.ps1"
@@ -199,6 +199,138 @@ Describe "ConvertTo-LFLineEnding" {
             $output = & $ScriptPath -Path $TestRoot *>&1 | Out-String -Width 4096
 
             $output | Should -Not -Match "Tip: re-run with -AddBom"
+        }
+    }
+
+    Context "-Type Go, UTF-8 without a BOM (the expected convention)" {
+
+        It "Only picks up .go files, not .ps1 files" {
+            $goFile = Join-Path $TestRoot "main.go"
+            $ps1File = Join-Path $TestRoot "script.ps1"
+            New-Utf8NoBomFile -Path $goFile -Content "package main`r`n"
+            New-Utf8BomFile -Path $ps1File -Content "Write-Host 'a'`r`n"
+
+            & $ScriptPath -Path $TestRoot -Type Go *>$null
+
+            [System.IO.File]::ReadAllText($goFile) | Should -Not -Match "`r"
+            # The .ps1 file must be completely untouched (still has its BOM, still CRLF)
+            Test-HasBom -Path $ps1File | Should -BeTrue
+            [System.IO.File]::ReadAllText($ps1File) | Should -Match "`r"
+        }
+
+        It "Normalizes CRLF to LF in a BOM-less .go file" {
+            $file = Join-Path $TestRoot "main.go"
+            New-Utf8NoBomFile -Path $file -Content "package main`r`n"
+
+            & $ScriptPath -Path $TestRoot -Type Go *>$null
+
+            [System.IO.File]::ReadAllText($file) | Should -Not -Match "`r"
+            Test-HasBom -Path $file | Should -BeFalse
+        }
+    }
+
+    Context "-Type Go: files that have a BOM (deviation from convention)" {
+
+        It "Skips the file by default and leaves it untouched" {
+            $file = Join-Path $TestRoot "main.go"
+            $original = "package main`r`n"
+            New-Utf8BomFile -Path $file -Content $original
+
+            & $ScriptPath -Path $TestRoot -Type Go *>$null
+
+            [System.IO.File]::ReadAllText($file) | Should -Be $original
+            Test-HasBom -Path $file | Should -BeTrue
+        }
+
+        It "Prints a 'has a BOM' skip message and a -RemoveBom tip" {
+            $file = Join-Path $TestRoot "main.go"
+            New-Utf8BomFile -Path $file -Content "package main`r`n"
+
+            $output = & $ScriptPath -Path $TestRoot -Type Go *>&1 | Out-String -Width 4096
+
+            $output | Should -Match "Skipped \(valid UTF-8, but has a BOM\)"
+            $output | Should -Match "Tip: re-run with -RemoveBom"
+        }
+
+        It "-RemoveBom strips the BOM and normalizes line endings in one pass" {
+            $file = Join-Path $TestRoot "main.go"
+            New-Utf8BomFile -Path $file -Content "package main`r`n"
+
+            & $ScriptPath -Path $TestRoot -Type Go -RemoveBom *>$null
+
+            Test-HasBom -Path $file | Should -BeFalse
+            [System.IO.File]::ReadAllText($file) | Should -Not -Match "`r"
+        }
+    }
+
+    Context "-LineEnding CRLF" {
+
+        It "Normalizes an LF file to CRLF when -LineEnding CRLF is specified" {
+            $file = Join-Path $TestRoot "toCrlf.ps1"
+            New-Utf8BomFile -Path $file -Content "Write-Host 'a'`nWrite-Host 'b'`n"
+
+            & $ScriptPath -Path $TestRoot -LineEnding CRLF *>$null
+
+            $content = [System.IO.File]::ReadAllText($file)
+            $content | Should -Be "Write-Host 'a'`r`nWrite-Host 'b'`r`n"
+        }
+
+        It "Leaves an already-CRLF file unchanged when -LineEnding CRLF is specified" {
+            $file = Join-Path $TestRoot "alreadyCrlf.ps1"
+            $original = "Write-Host 'a'`r`n"
+            New-Utf8BomFile -Path $file -Content $original
+
+            & $ScriptPath -Path $TestRoot -LineEnding CRLF *>$null
+
+            [System.IO.File]::ReadAllText($file) | Should -Be $original
+        }
+    }
+
+    Context "Warning-and-stop combinations" {
+
+        It "Stops and does not modify files for -Type Go with -LineEnding CRLF" {
+            $file = Join-Path $TestRoot "main.go"
+            $original = "package main`r`n"
+            New-Utf8NoBomFile -Path $file -Content $original
+
+            & $ScriptPath -Path $TestRoot -Type Go -LineEnding CRLF 3>$null
+
+            [System.IO.File]::ReadAllText($file) | Should -Be $original
+        }
+
+        It "Proceeds for -Type Go with -LineEnding CRLF when -IgnoreWarnings is passed" {
+            $file = Join-Path $TestRoot "main.go"
+            New-Utf8NoBomFile -Path $file -Content "package main`nold`n"
+
+            & $ScriptPath -Path $TestRoot -Type Go -LineEnding CRLF -IgnoreWarnings *>$null
+
+            [System.IO.File]::ReadAllText($file) | Should -Be "package main`r`nold`r`n"
+        }
+
+        It "Stops and does not modify files for -Type Go with -AddBom" {
+            $file = Join-Path $TestRoot "main.go"
+            $original = "package main`r`n"
+            New-Utf8NoBomFile -Path $file -Content $original
+
+            & $ScriptPath -Path $TestRoot -Type Go -AddBom 3>$null
+
+            [System.IO.File]::ReadAllText($file) | Should -Be $original
+            Test-HasBom -Path $file | Should -BeFalse
+        }
+
+        It "Stops and does not modify files for -Type ps1 with -RemoveBom" {
+            $file = Join-Path $TestRoot "script.ps1"
+            $original = "Write-Host 'a'`r`n"
+            New-Utf8BomFile -Path $file -Content $original
+
+            & $ScriptPath -Path $TestRoot -Type ps1 -RemoveBom 3>$null
+
+            [System.IO.File]::ReadAllText($file) | Should -Be $original
+            Test-HasBom -Path $file | Should -BeTrue
+        }
+
+        It "Throws when -AddBom and -RemoveBom are combined, even with -IgnoreWarnings" {
+            { & $ScriptPath -Path $TestRoot -AddBom -RemoveBom -IgnoreWarnings } | Should -Throw
         }
     }
 
